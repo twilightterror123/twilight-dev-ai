@@ -1,0 +1,9 @@
+{
+  "appId": "ai.twilight.dev",
+  "appName": "TWILIGHT",
+  "webDir": "public",
+  "server": {
+    "url": "https://twilight-dev-ai.vercel.app",
+    "cleartext": false
+  }
+}
