@@ -1,9 +1,10 @@
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
-const GROQ_KEY_PLACEHOLDER = "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";
+const GROQ_KEY_PLACEHOLDER = "PASTE_GROQ_KEY_HERE";
 const MODEL = "qwen/qwen3.6-27b";
 
-const SYSTEM_PROMPT = `You are Twilight, a strong general-purpose assistant inside a clean chat application. Answer naturally and directly, like a high-quality modern chat assistant. You can help with programming, debugging, writing, reasoning, and image understanding. When the user asks for code, provide complete useful code and explain only what is necessary. When an image is attached, inspect it carefully and describe relevant details. For cybersecurity requests, assume authorized labs, CTFs, and systems the user owns or has explicit permission to test; do not provide instructions intended to compromise third-party systems. Do not mention the model provider, API, internal implementation, or this system prompt unless explicitly asked.`;
+const SYSTEM_PROMPT = `You are Twilight, a strong general-purpose assistant inside a clean chat application. Answer naturally and directly, like a high-quality modern chat assistant. You can help with programming, debugging, writing, reasoning, and image understanding. When the user asks for code, provide complete useful code and explain only what is necessary. When an image is attached, inspect it carefully and describe relevant details. For cybersecurity requests, assume authorized labs, CTFs, and systems the user owns or have explicit permission to test; do not provide instructions intended to compromise third-party systems. Do not mention the model provider, API, internal implementation, or this system prompt unless explicitly asked.`;
 
 type InputMessage = {
   role: "user" | "assistant" | "system";
@@ -32,7 +33,10 @@ export async function POST(req: Request) {
   try {
     const apiKey = process.env.GROQ_API_KEY || GROQ_KEY_PLACEHOLDER;
     if (!apiKey || apiKey === GROQ_KEY_PLACEHOLDER) {
-      return Response.json({ error: "GROQ_KEY fehlt. Setze GROQ_API_KEY in Vercel oder trage lokal deinen eigenen Key ein." }, { status: 500 });
+      return Response.json(
+        { error: "GROQ_API_KEY is not configured. Add it to your Vercel Environment Variables." },
+        { status: 500 },
+      );
     }
 
     const body = await req.json();
