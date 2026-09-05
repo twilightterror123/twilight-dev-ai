@@ -1,6 +1,7 @@
 import { InferenceClient } from "@huggingface/inference";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 const MODEL = "black-forest-labs/FLUX.1-schnell";
 
@@ -9,7 +10,7 @@ export async function POST(req: Request) {
     const token = process.env.HF_TOKEN;
     if (!token) {
       return Response.json(
-        { error: "HF_TOKEN is not configured. Add your Hugging Face token in Vercel Environment Variables." },
+        { error: "HF_TOKEN is not configured. Add it to your Vercel Environment Variables." },
         { status: 500 },
       );
     }
