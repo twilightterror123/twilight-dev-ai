@@ -5,6 +5,14 @@ export const maxDuration = 60;
 
 const MODEL = "black-forest-labs/FLUX.1-schnell";
 
+const REALISM_PREFIX = [
+  "Create a natural, photorealistic image with believable real-world detail.",
+  "Use realistic proportions, authentic materials and textures, natural lighting, subtle imperfections, and a genuine camera-like look.",
+  "Avoid the typical AI look: no plastic skin, no overly perfect surfaces, no CGI appearance, no 3D-rendered feel, no illustration or cartoon styling.",
+  "Keep the requested subject and composition faithful to the user's description.",
+  "Do not add watermarks, logos, captions, or extra text unless the user explicitly asks for them.",
+].join(" ");
+
 export async function POST(req: Request) {
   try {
     const token = process.env.HF_TOKEN;
@@ -21,20 +29,18 @@ export async function POST(req: Request) {
       return Response.json({ error: "Please describe the image." }, { status: 400 });
     }
 
+    const enhancedPrompt = `${REALISM_PREFIX} User request: ${prompt}`;
     const client = new InferenceClient(token);
     const image = await client.textToImage({
       model: MODEL,
       provider: "fal-ai",
-      inputs: prompt,
+      inputs: enhancedPrompt,
       parameters: {
         width: 1024,
         height: 1024,
       },
     });
 
-    // The SDK typings can expose the result as a string depending on the
-    // installed version/provider, while other versions return a Blob-like
-    // object. Support both forms so the Next.js build stays type-safe.
     if (typeof image === "string") {
       const value = image.trim();
       if (value.startsWith("data:image/")) {
