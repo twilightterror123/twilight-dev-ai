@@ -2,8 +2,8 @@
 
 import { useRef, useState } from "react";
 
-type Message = { id: number; role: "user" | "assistant"; text?: string; image?: string; video?: string };
-type Mode = "chat" | "image" | "video";
+type Message = { id: number; role: "user" | "assistant"; text?: string; image?: string };
+type Mode = "chat" | "image";
 
 function TwilightMark({ className = "" }: { className?: string }) {
   return (
@@ -40,17 +40,6 @@ export default function Home() {
     return data.image as string;
   }
 
-  async function generateVideo(prompt: string) {
-    const response = await fetch("/api/generate-video", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Video generation failed.");
-    return data.video as string;
-  }
-
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
     const text = input.trim();
@@ -67,9 +56,6 @@ export default function Home() {
       if (mode === "image") {
         const result = await generateImage(text || "Create an image based on the attached reference image.");
         setMessages((current) => [...current, { id: Date.now() + 1, role: "assistant", text: "Here is your image.", image: result }]);
-      } else if (mode === "video") {
-        const result = await generateVideo(text || "Create a cinematic video based on the attached reference image.");
-        setMessages((current) => [...current, { id: Date.now() + 1, role: "assistant", text: "Here is your video.", video: result }]);
       } else {
         const response = await fetch("/api/chat", {
           method: "POST",
@@ -116,7 +102,7 @@ export default function Home() {
           {messages.length === 0 ? (
             <div className="welcome">
               <div className="welcomeLogo"><TwilightMark /></div>
-              <h1>How can I help?</h1>
+              <h1>{mode === "image" ? "Create an image" : "How can I help?"}</h1>
             </div>
           ) : (
             <div className="messages">
@@ -126,7 +112,6 @@ export default function Home() {
                   <div className="messageBody">
                     {message.text && <div className="messageText">{message.text}</div>}
                     {message.image && <img src={message.image} alt="Generated or attached" className="messageImage" />}
-                    {message.video && <video src={message.video} controls className="messageVideo" />}
                   </div>
                 </article>
               ))}
@@ -146,12 +131,11 @@ export default function Home() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(e); } }}
-            placeholder={mode === "image" ? "Describe the image..." : mode === "video" ? "Describe the video..." : "Message Twilight..."}
+            placeholder={mode === "image" ? "Describe the image..." : "Message Twilight..."}
             rows={1}
           />
           <div className="composerBottom">
             <button type="button" className={`modeButton ${mode === "image" ? "active" : ""}`} onClick={() => setMode(mode === "image" ? "chat" : "image")}>Image</button>
-            <button type="button" className={`modeButton ${mode === "video" ? "active" : ""}`} onClick={() => setMode(mode === "video" ? "chat" : "video")}>Video</button>
             <button type="button" className="iconButton" onClick={() => fileRef.current?.click()} aria-label="Attach image">+</button>
             <button className="sendButton" disabled={busy || (!input.trim() && !image)} aria-label="Send">↑</button>
           </div>
