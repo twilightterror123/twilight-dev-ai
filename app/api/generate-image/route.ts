@@ -1,12 +1,17 @@
+import { InferenceClient } from "@huggingface/inference";
+
 export const runtime = "nodejs";
 
-const MODEL = "gpt-image-2";
+const MODEL = "black-forest-labs/FLUX.1-schnell";
 
 export async function POST(req: Request) {
   try {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      return Response.json({ error: "OPENAI_API_KEY is not configured." }, { status: 500 });
+    const token = process.env.HF_TOKEN;
+    if (!token) {
+      return Response.json(
+        { error: "HF_TOKEN is not configured. Add your Hugging Face token in Vercel Environment Variables." },
+        { status: 500 },
+      );
     }
 
     const body = await req.json();
@@ -15,35 +20,27 @@ export async function POST(req: Request) {
       return Response.json({ error: "Please describe the image." }, { status: 400 });
     }
 
-    const response = await fetch("https://api.openai.com/v1/images/generations", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+    const client = new InferenceClient(token);
+    const image = await client.textToImage({
+      model: MODEL,
+      provider: "fal-ai",
+      inputs: prompt,
+      parameters: {
+        width: 1024,
+        height: 1024,
       },
-      body: JSON.stringify({
-        model: MODEL,
-        prompt,
-        size: "1024x1024",
-        quality: "auto",
-        output_format: "png",
-      }),
     });
 
-    const data = await response.json();
-    if (!response.ok) {
-      console.error("Image provider error:", data?.error?.message || response.status);
-      return Response.json({ error: data?.error?.message || "Image generation failed." }, { status: 502 });
-    }
+    const buffer = Buffer.from(await image.arrayBuffer());
+    const base64 = buffer.toString("base64");
+    const contentType = image.type || "image/png";
 
-    const base64 = data?.data?.[0]?.b64_json;
-    if (!base64) {
-      return Response.json({ error: "No image was returned." }, { status: 502 });
-    }
-
-    return Response.json({ image: `data:image/png;base64,${base64}` });
+    return Response.json({ image: `data:${contentType};base64,${base64}` });
   } catch (error) {
-    console.error("Image route error:", error);
-    return Response.json({ error: "Something went wrong while generating the image." }, { status: 500 });
+    console.error("Image generation error:", error);
+    return Response.json(
+      { error: error instanceof Error ? error.message : "Image generation failed." },
+      { status: 502 },
+    );
   }
 }
