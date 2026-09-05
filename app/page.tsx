@@ -7,11 +7,7 @@ type Message = { id: string; role: Role; text?: string; image?: string };
 type Chat = { id: string; title: string; updatedAt: number; messages: Message[] };
 type Mode = "chat" | "image";
 type Platform = "windows" | "linux" | "android" | "macos" | "ios" | "unknown";
-
-type ThinkingPhase = {
-  title: string;
-  detail: string;
-};
+type ThinkingPhase = { title: string; detail: string };
 
 const STORAGE_KEY = "twilight-chats-v3";
 
@@ -69,7 +65,6 @@ function safeSaveChats(chats: Chat[]) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
   } catch {
-    // Large image payloads can exceed localStorage. Text chat history remains available.
     const textOnly = chats.map((chat) => ({
       ...chat,
       messages: chat.messages.map((message) => ({ id: message.id, role: message.role, text: message.text })),
@@ -92,7 +87,7 @@ export default function Home() {
   const [platform, setPlatform] = useState<Platform>("unknown");
   const [showAppPrompt, setShowAppPrompt] = useState(false);
   const [thinkingPhase, setThinkingPhase] = useState<ThinkingPhase>({
-    title: "Think",
+    title: "Analyzing",
     detail: "Reading your message…",
   });
   const fileRef = useRef<HTMLInputElement>(null);
@@ -118,17 +113,17 @@ export default function Home() {
   useEffect(() => {
     if (!busy) return;
     const phases: ThinkingPhase[] = [
-      { title: "Think", detail: "Reading your message…" },
-      { title: "Think", detail: "Understanding the request…" },
-      { title: "Think", detail: "Working through the answer…" },
-      { title: "Think", detail: "Preparing the response…" },
+      { title: "Analyzing", detail: "Reading your message…" },
+      { title: "Thinking", detail: "Working through the request…" },
+      { title: "Checking", detail: "Checking the answer for mistakes…" },
+      { title: "Finalizing", detail: "Preparing the response…" },
     ];
     let index = 0;
     setThinkingPhase(phases[0]);
     const timer = window.setInterval(() => {
-      index = Math.min(index + 1, phases.length - 1);
+      index = (index + 1) % phases.length;
       setThinkingPhase(phases[index]);
-    }, 900);
+    }, 850);
     return () => window.clearInterval(timer);
   }, [busy]);
 
