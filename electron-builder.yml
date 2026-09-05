@@ -5,7 +5,6 @@ files:
   - electron/**
 directories:
   output: dist-app
-publish: never
 win:
   target:
     - nsis
