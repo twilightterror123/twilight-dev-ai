@@ -1,0 +1,90 @@
+name: Build Twilight Apps
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm install
+      - name: Build Windows EXE
+        run: npx electron-builder --win nsis --x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: twilight-windows
+          path: dist-app/*.exe
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm install
+      - name: Build Debian package
+        run: npx electron-builder --linux deb --x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: twilight-linux
+          path: dist-app/*.deb
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      - run: npm install
+      - run: npx cap add android
+      - name: Build Android APK
+        working-directory: android
+        run: ./gradlew assembleDebug
+      - run: mkdir -p dist-app && cp android/app/build/outputs/apk/debug/app-debug.apk dist-app/Twilight-latest-android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: twilight-android
+          path: dist-app/Twilight-latest-android.apk
+
+  release:
+    needs: [windows, linux, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Normalize filenames
+        run: |
+          mkdir -p release-final
+          find release -type f -name '*.exe' -exec cp {} release-final/Twilight-latest-windows.exe \;
+          find release -type f -name '*.deb' -exec cp {} release-final/Twilight-latest-linux.deb \;
+          find release -type f -name '*.apk' -exec cp {} release-final/Twilight-latest-android.apk \;
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: TWILIGHT Latest
+          prerelease: false
+          make_latest: true
+          files: release-final/*
+          overwrite_files: true
