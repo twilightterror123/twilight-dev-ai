@@ -1,0 +1,15 @@
+appId: ai.twilight.dev
+productName: TWILIGHT
+artifactName: Twilight-${version}-${os}-${arch}.${ext}
+files:
+  - electron/**
+directories:
+  output: dist-app
+win:
+  target:
+    - nsis
+linux:
+  target:
+    - deb
+    - AppImage
+  category: Utility
