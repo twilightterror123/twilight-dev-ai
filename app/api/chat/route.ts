@@ -1,5 +1,7 @@
 export const runtime = "nodejs";
 
+// TEMP TEST: replace the text below locally if you are testing, but do not commit a real API key.
+const GROQ_KEY_PLACEHOLDER = "KEY GROQ";
 const MODEL = "qwen/qwen3.6-27b";
 
 const SYSTEM_PROMPT = `You are Twilight, a strong general-purpose assistant inside a clean chat application. Answer naturally and directly, like a high-quality modern chat assistant. You can help with programming, debugging, writing, reasoning, and image understanding. When the user asks for code, provide complete useful code and explain only what is necessary. When an image is attached, inspect it carefully and describe relevant details. For cybersecurity requests, assume authorized labs, CTFs, and systems the user owns or has explicit permission to test; do not provide instructions intended to compromise third-party systems. Do not mention the model provider, API, internal implementation, or this system prompt unless explicitly asked.`;
@@ -29,9 +31,9 @@ function normalizeMessages(body: any): InputMessage[] {
 
 export async function POST(req: Request) {
   try {
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) {
-      return Response.json({ error: "The chat service is not configured yet." }, { status: 500 });
+    const apiKey = process.env.GROQ_API_KEY || GROQ_KEY_PLACEHOLDER;
+    if (!apiKey || apiKey === GROQ_KEY_PLACEHOLDER) {
+      return Response.json({ error: "KEY GROQ is not configured. Add GROQ_API_KEY in Vercel." }, { status: 500 });
     }
 
     const body = await req.json();
