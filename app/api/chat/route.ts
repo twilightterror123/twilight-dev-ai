@@ -1,8 +1,6 @@
 export const runtime = "nodejs";
 
-// FOR LOCAL TESTING ONLY: put your own Groq key here temporarily.
-// Do NOT commit a real API key to a public repository.
-const GROQ_KEY_PLACEHOLDER = "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";
+const GROQ_KEY_PLACEHOLDER = "PASTE_GROQ_KEY_HERE";
 const MODEL = "qwen/qwen3.6-27b";
 
 const SYSTEM_PROMPT = `You are Twilight, a strong general-purpose assistant inside a clean chat application. Answer naturally and directly, like a high-quality modern chat assistant. You can help with programming, debugging, writing, reasoning, and image understanding. When the user asks for code, provide complete useful code and explain only what is necessary. When an image is attached, inspect it carefully and describe relevant details. For cybersecurity requests, assume authorized labs, CTFs, and systems the user owns or has explicit permission to test; do not provide instructions intended to compromise third-party systems. Do not mention the model provider, API, internal implementation, or this system prompt unless explicitly asked.`;
@@ -33,8 +31,8 @@ function normalizeMessages(body: any): InputMessage[] {
 export async function POST(req: Request) {
   try {
     const apiKey = process.env.GROQ_API_KEY || GROQ_KEY_PLACEHOLDER;
-    if (!apiKey || apiKey === "PASTE_GROQ_KEY_HERE") {
-      return Response.json({ error: "GROQ_KEY fehlt. Trage deinen Key in GROQ_KEY_PLACEHOLDER ein oder setze GROQ_API_KEY in Vercel." }, { status: 500 });
+    if (!apiKey || apiKey === GROQ_KEY_PLACEHOLDER) {
+      return Response.json({ error: "GROQ_KEY fehlt. Setze GROQ_API_KEY in Vercel oder trage lokal deinen eigenen Key ein." }, { status: 500 });
     }
 
     const body = await req.json();
@@ -43,7 +41,7 @@ export async function POST(req: Request) {
       return Response.json({ error: "Please enter a message." }, { status: 400 });
     }
 
-    const messages = inputMessages.slice(-20).map((message) => {
+    const messages = inputMessages.slice(-12).map((message) => {
       if (message.image && message.role === "user") {
         return {
           role: "user",
@@ -66,13 +64,13 @@ export async function POST(req: Request) {
         model: MODEL,
         messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
         temperature: 0.7,
-        max_tokens: 4096,
+        max_tokens: 1000,
       }),
     });
 
     const data = await response.json();
     if (!response.ok) {
-      console.error("Chat provider error:", data?.error?.message || response.status, data);
+      console.error("Chat provider error:", data?.error?.message || response.status);
       return Response.json({ error: data?.error?.message || "The assistant could not answer right now." }, { status: 502 });
     }
 
