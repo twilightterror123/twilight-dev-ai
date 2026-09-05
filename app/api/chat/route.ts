@@ -1,5 +1,8 @@
 export const runtime = "nodejs";
 
+// FOR LOCAL TESTING ONLY: put your own Groq key here temporarily.
+// Do NOT commit a real API key to a public repository.
+const GROQ_KEY_PLACEHOLDER = "PASTE_GROQ_KEY_HERE";
 const MODEL = "qwen/qwen3.6-27b";
 
 const SYSTEM_PROMPT = `You are Twilight, a strong general-purpose assistant inside a clean chat application. Answer naturally and directly, like a high-quality modern chat assistant. You can help with programming, debugging, writing, reasoning, and image understanding. When the user asks for code, provide complete useful code and explain only what is necessary. When an image is attached, inspect it carefully and describe relevant details. For cybersecurity requests, assume authorized labs, CTFs, and systems the user owns or has explicit permission to test; do not provide instructions intended to compromise third-party systems. Do not mention the model provider, API, internal implementation, or this system prompt unless explicitly asked.`;
@@ -29,9 +32,9 @@ function normalizeMessages(body: any): InputMessage[] {
 
 export async function POST(req: Request) {
   try {
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) {
-      return Response.json({ error: "KEY GROQ fehlt. Setze GROQ_API_KEY in Vercel." }, { status: 500 });
+    const apiKey = process.env.GROQ_API_KEY || GROQ_KEY_PLACEHOLDER;
+    if (!apiKey || apiKey === "PASTE_GROQ_KEY_HERE") {
+      return Response.json({ error: "GROQ_KEY fehlt. Trage deinen Key in GROQ_KEY_PLACEHOLDER ein oder setze GROQ_API_KEY in Vercel." }, { status: 500 });
     }
 
     const body = await req.json();
@@ -69,11 +72,8 @@ export async function POST(req: Request) {
 
     const data = await response.json();
     if (!response.ok) {
-      console.error("Chat provider error:", data?.error?.message || response.status, data?.error?.type || "");
-      return Response.json(
-        { error: data?.error?.message || "The assistant could not answer right now." },
-        { status: 502 }
-      );
+      console.error("Chat provider error:", data?.error?.message || response.status, data);
+      return Response.json({ error: data?.error?.message || "The assistant could not answer right now." }, { status: 502 });
     }
 
     const text = data?.choices?.[0]?.message?.content;
