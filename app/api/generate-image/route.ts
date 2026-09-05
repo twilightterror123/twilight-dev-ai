@@ -32,9 +32,24 @@ export async function POST(req: Request) {
       },
     });
 
-    const buffer = Buffer.from(await image.arrayBuffer());
+    // The SDK typings can expose the result as a string depending on the
+    // installed version/provider, while other versions return a Blob-like
+    // object. Support both forms so the Next.js build stays type-safe.
+    if (typeof image === "string") {
+      const value = image.trim();
+      if (value.startsWith("data:image/")) {
+        return Response.json({ image: value });
+      }
+      if (value.startsWith("http://") || value.startsWith("https://")) {
+        return Response.json({ image: value });
+      }
+      return Response.json({ image: `data:image/png;base64,${value}` });
+    }
+
+    const imageBlob = image as Blob;
+    const buffer = Buffer.from(await imageBlob.arrayBuffer());
     const base64 = buffer.toString("base64");
-    const contentType = image.type || "image/png";
+    const contentType = imageBlob.type || "image/png";
 
     return Response.json({ image: `data:${contentType};base64,${base64}` });
   } catch (error) {
