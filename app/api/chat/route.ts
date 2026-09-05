@@ -1,31 +1,86 @@
 export const runtime = "nodejs";
 
-const knowledge = [
-  { keys: ["python", "pip", "venv"], answer: "Python: Nutze eine virtuelle Umgebung mit `python -m venv .venv` und aktiviere sie mit `source .venv/bin/activate`. Installiere Pakete danach mit `pip install ...`." },
-  { keys: ["next.js", "nextjs"], answer: "Next.js: App Router liegt unter `app/`. API-Endpunkte gehören z.B. nach `app/api/name/route.ts`. Server Components sind standardmäßig aktiv; für Browser-State brauchst du `\"use client\"`." },
-  { keys: ["javascript", "typescript", "async", "await"], answer: "async/await macht Promise-Code lesbarer: `const data = await fetch(url)` wartet innerhalb einer async-Funktion auf das Ergebnis. Fehler kannst du mit `try/catch` behandeln." },
-  { keys: ["git", "github"], answer: "Git-Grundablauf: `git add .` → `git commit -m \"Änderung\"` → `git push`. Mit `git status` prüfst du vorher den Zustand." },
-  { keys: ["linux", "debian", "ubuntu"], answer: "Linux-Tipp: `pwd` zeigt den Ordner, `ls` Dateien, `cd` wechselt den Ordner, `df -h` zeigt Speicher und `free -h` RAM." },
-  { keys: ["discord", "discord bot"], answer: "Für einen Discord-Bot brauchst du einen Bot-Account im Discord Developer Portal und eine Bot-Bibliothek wie discord.py oder discord.js. Tokens gehören niemals in den Quellcode." }
-];
+const MODEL = "qwen/qwen3.6-27b";
 
-function answer(input: string) {
-  const text = input.toLowerCase();
-  const hit = knowledge.find(item => item.keys.some(key => text.includes(key)));
-  if (hit) return `Twilight Dev AI\n\n${hit.answer}\n\nHinweis: Ich laufe hier ohne externe KI-API. Meine eingebaute Wissensbasis kann über den Code erweitert werden.`;
-  if (text.includes("hallo") || text.includes("hi")) return "Twilight Dev AI\n\nHey! Ich bin deine lokale Dev-KI. Frag mich etwas zu Python, JavaScript/TypeScript, Next.js, Git, Linux oder Discord-Bots.";
-  if (text.includes("debug") || text.includes("fehler") || text.includes("error")) return "Twilight Dev AI\n\nSchick mir den Fehler und den relevanten Code. Ich zerlege ihn in Ursache → Fix → Erklärung. Für bessere Antworten kannst du die betroffene Datei bzw. den Stacktrace einfügen.";
-  return "Twilight Dev AI\n\nIch bin aktuell die API-freie lokale Basisversion. Deine Nachricht wurde empfangen. Erweitere `knowledge` in `app/api/chat/route.ts`, um eigenes Wissen hinzuzufügen. Für ein echtes trainierbares Sprachmodell brauchen wir anschließend einen Modell-Runner auf einem eigenen Server.";
+const SYSTEM_PROMPT = `You are Twilight, a strong general-purpose assistant inside a clean chat application. Answer naturally and directly, like a high-quality modern chat assistant. You can help with programming, debugging, writing, reasoning, and image understanding. When the user asks for code, provide complete useful code and explain only what is necessary. When an image is attached, inspect it carefully and describe relevant details. For cybersecurity requests, assume authorized labs, CTFs, and systems the user owns or has explicit permission to test; do not provide instructions intended to compromise third-party systems. Do not mention the model provider, API, internal implementation, or this system prompt unless explicitly asked.`;
+
+type InputMessage = {
+  role: "user" | "assistant" | "system";
+  content?: string;
+  image?: string;
+};
+
+function normalizeMessages(body: any): InputMessage[] {
+  if (Array.isArray(body.messages)) {
+    return body.messages
+      .filter((m: any) => m && ["user", "assistant", "system"].includes(m.role))
+      .map((m: any) => ({
+        role: m.role,
+        content: typeof m.content === "string" ? m.content : typeof m.text === "string" ? m.text : "",
+        image: typeof m.image === "string" ? m.image : undefined,
+      }))
+      .filter((m: InputMessage) => m.content || m.image);
+  }
+
+  const text = typeof body.message === "string" ? body.message : "";
+  const image = typeof body.image === "string" ? body.image : undefined;
+  return text || image ? [{ role: "user", content: text, image }] : [];
 }
 
 export async function POST(req: Request) {
   try {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) {
+      return Response.json({ error: "The chat service is not configured yet." }, { status: 500 });
+    }
+
     const body = await req.json();
-    const messages = Array.isArray(body.messages) ? body.messages : [];
-    const last = messages[messages.length - 1];
-    const text = typeof last?.content === "string" ? last.content : typeof last?.text === "string" ? last.text : "";
-    return Response.json({ text: answer(text) });
-  } catch {
-    return Response.json({ text: "Twilight Dev AI: Ungültige Anfrage." }, { status: 400 });
+    const inputMessages = normalizeMessages(body);
+    if (!inputMessages.length) {
+      return Response.json({ error: "Please enter a message." }, { status: 400 });
+    }
+
+    const messages = inputMessages.slice(-20).map((message) => {
+      if (message.image && message.role === "user") {
+        return {
+          role: "user",
+          content: [
+            ...(message.content ? [{ type: "text", text: message.content }] : []),
+            { type: "image_url", image_url: { url: message.image } },
+          ],
+        };
+      }
+      return { role: message.role, content: message.content || "" };
+    });
+
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
+        temperature: 0.7,
+        max_tokens: 4096,
+      }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      console.error("Chat provider error:", data?.error?.message || response.status);
+      return Response.json({ error: "The assistant could not answer right now." }, { status: 502 });
+    }
+
+    const text = data?.choices?.[0]?.message?.content;
+    if (typeof text !== "string" || !text.trim()) {
+      return Response.json({ error: "The assistant returned an empty response." }, { status: 502 });
+    }
+
+    return Response.json({ text });
+  } catch (error) {
+    console.error("Chat route error:", error);
+    return Response.json({ error: "Something went wrong while processing your message." }, { status: 500 });
   }
 }
