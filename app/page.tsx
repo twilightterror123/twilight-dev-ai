@@ -2,19 +2,107 @@
 
 import { useRef, useState } from "react";
 
-type Mode = "terminal" | "recon" | "audit" | "code" | "vision" | "knowledge";
 type Message = { id: number; role: "user" | "assistant"; text?: string; image?: string };
 
-const modes = [["terminal","TERMINAL"],["recon","RECON"],["audit","AUDIT"],["code","CODE"],["vision","VISION"],["knowledge","MEMORY"]] as const;
-
 export default function Home() {
-  const [mode,setMode]=useState<Mode>("terminal"),[input,setInput]=useState(""),[messages,setMessages]=useState<Message[]>([]),[busy,setBusy]=useState(false),[image,setImage]=useState<string|null>(null),[knowledge,setKnowledge]=useState("");
-  const fileRef=useRef<HTMLInputElement>(null);
-  async function fileToData(file:File){if(!file.type.startsWith("image/"))return;if(file.size>8*1024*1024)return alert("Maximal 8 MB.");const r=new FileReader();r.onload=()=>setImage(String(r.result));r.readAsDataURL(file)}
-  async function submit(e?:React.FormEvent){e?.preventDefault();const text=input.trim();if((!text&&!image)||busy)return;setInput("");const img=image;setImage(null);setMessages(m=>[...m,{id:Date.now(),role:"user",text,image:img??undefined}]);setBusy(true);try{const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:text,mode,image:img,knowledge:knowledge.slice(0,20000)})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Request failed");setMessages(m=>[...m,{id:Date.now()+1,role:"assistant",text:d.text,image:d.image}])}catch(err){setMessages(m=>[...m,{id:Date.now()+1,role:"assistant",text:`ERROR: ${err instanceof Error?err.message:String(err)}`}])}finally{setBusy(false)}}
-  return <main className="terminalApp">
-    <aside className="terminalSide"><div className="asciiLogo">TWILIGHT<br/><span>PENTEST KI</span></div><div className="sideLine"/><div className="tiny">SYSTEM // ONLINE</div><div className="menuTitle">MODULES</div>{modes.map(([id,label])=><button key={id} onClick={()=>setMode(id)} className={`terminalNav ${mode===id?"selected":""}`}>&gt; {label}</button>)}<div className="sideFooter"><span className="greenDot"/> GROQ ENGINE<br/><small>SERVER-SIDE / KEY HIDDEN</small></div></aside>
-    <section className="terminalMain"><header className="terminalHeader"><span>root@twilight:~$</span><span className="headerMode">[{mode.toUpperCase()}]</span></header><div className="terminalBody">{messages.length===0?<div className="boot"><pre>{`╔════════════════════════════════════════════════════════════╗\n║                    TWILIGHT PENTEST KI                    ║\n║                 SECURITY INTELLIGENCE                     ║\n╚════════════════════════════════════════════════════════════╝`}</pre><p><b>READY.</b> Security analysis, code, recon planning and vision.</p><p className="dim">Attach an image or enter a command.</p><div className="commandExamples">{["analyze this code for vulnerabilities","build a CTF recon checklist","explain this security error","review my architecture"].map(x=><button key={x} onClick={()=>setInput(x)}>&gt; {x}</button>)}</div></div>:<div className="messages">{messages.map(m=><div key={m.id} className={`msg ${m.role}`}><div className="prompt">{m.role==="user"?"operator":"twilight"}@local:$</div><div className="msgContent">{m.text&&<pre>{m.text}</pre>}{m.image&&<img src={m.image} alt="uploaded"/>}</div></div>)}{busy&&<div className="msg"><div className="prompt">twilight@local:$</div><pre className="blink">processing_</pre></div>}</div>}</div>
-    <form className="commandBar" onSubmit={submit}>{image&&<div className="attachment"><img src={image} alt="preview"/><button type="button" onClick={()=>setImage(null)}>×</button></div>}<textarea value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();void submit(e)}}} placeholder={`root@twilight:~$ enter ${mode} command...`} rows={3}/><div className="barBottom"><div><button type="button" className="attach" onClick={()=>fileRef.current?.click()}>[ ATTACH IMAGE ]</button><button type="button" className="attach" onClick={()=>setMode("vision")}>[ VISION ]</button><span> KEY NEVER EXPOSED</span></div><button className="execute" disabled={busy||(!input.trim()&&!image)}>[ EXECUTE ]</button></div><input ref={fileRef} hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>e.target.files?.[0]&&void fileToData(e.target.files[0])}/></form>
-    <div className="memoryBar"><span>MEMORY:</span><input value={knowledge} onChange={e=>setKnowledge(e.target.value)} placeholder="local knowledge / project context..."/><button type="button" onClick={()=>localStorage.setItem("twilight-memory",knowledge)}>SAVE</button></div></section></main>
+  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [image, setImage] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  function readImage(file: File) {
+    if (!file.type.startsWith("image/") || file.size > 8 * 1024 * 1024) return;
+    const reader = new FileReader();
+    reader.onload = () => setImage(String(reader.result));
+    reader.readAsDataURL(file);
+  }
+
+  async function submit(e?: React.FormEvent) {
+    e?.preventDefault();
+    const text = input.trim();
+    if ((!text && !image) || busy) return;
+    const attached = image;
+    setInput("");
+    setImage(null);
+    setMessages((m) => [...m, { id: Date.now(), role: "user", text, image: attached ?? undefined }]);
+    setBusy(true);
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text, image: attached }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Request failed");
+      setMessages((m) => [...m, { id: Date.now() + 1, role: "assistant", text: data.text, image: data.image }]);
+    } catch (error) {
+      setMessages((m) => [...m, { id: Date.now() + 1, role: "assistant", text: error instanceof Error ? error.message : "Something went wrong." }]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function newChat() {
+    setMessages([]);
+    setInput("");
+    setImage(null);
+  }
+
+  return (
+    <main className="chatApp">
+      <aside className="chatSidebar">
+        <button className="logoButton" onClick={newChat} aria-label="New chat">
+          <span className="logoMark">T</span>
+          <span>TWILIGHT</span>
+        </button>
+        <button className="newChat" onClick={newChat}>+ New chat</button>
+      </aside>
+
+      <section className="chatMain">
+        <header className="chatHeader">
+          <span className="brandName">TWILIGHT PENTEST KI</span>
+        </header>
+
+        <div className="chatContent">
+          {messages.length === 0 ? (
+            <div className="welcome">
+              <div className="welcomeLogo">T</div>
+              <h1>How can I help?</h1>
+              <p>Code, analyze, create, and solve.</p>
+            </div>
+          ) : (
+            <div className="messages">
+              {messages.map((message) => (
+                <article key={message.id} className={`message ${message.role}`}>
+                  {message.role === "assistant" && <div className="messageLogo">T</div>}
+                  <div className="messageBody">
+                    {message.text && <div className="messageText">{message.text}</div>}
+                    {message.image && <img src={message.image} alt="Attached" className="messageImage" />}
+                  </div>
+                </article>
+              ))}
+              {busy && <article className="message assistant"><div className="messageLogo">T</div><div className="typing"><i/><i/><i/></div></article>}
+            </div>
+          )}
+        </div>
+
+        <form className="composer" onSubmit={submit}>
+          {image && <div className="attachment"><img src={image} alt="Preview"/><button type="button" onClick={() => setImage(null)}>×</button></div>}
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(e); } }}
+            placeholder="Message Twilight..."
+            rows={1}
+          />
+          <div className="composerBottom">
+            <button type="button" className="iconButton" onClick={() => fileRef.current?.click()} aria-label="Attach image">+</button>
+            <button className="sendButton" disabled={busy || (!input.trim() && !image)} aria-label="Send">↑</button>
+          </div>
+          <input ref={fileRef} hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && readImage(e.target.files[0])}/>
+        </form>
+      </section>
+    </main>
+  );
 }
