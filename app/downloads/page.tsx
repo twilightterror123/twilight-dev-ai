@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 type Platform = "windows" | "linux" | "android";
+type DownloadPlatform = Platform | "other";
 
 type AppInfo = { name: string; file: string; note: string; icon: string };
 
@@ -12,7 +13,7 @@ const apps: Record<Platform, AppInfo> = {
   android: { name: "Android", file: "Twilight-latest-android.apk", note: "Android · APK", icon: "▣" },
 };
 
-function detectPlatform(): Platform | "other" {
+function detectPlatform(): DownloadPlatform {
   if (typeof navigator === "undefined") return "other";
   const ua = navigator.userAgent.toLowerCase();
   if (/android/.test(ua)) return "android";
@@ -26,7 +27,7 @@ function hrefFor(platform: Platform) {
 }
 
 export default function DownloadsPage() {
-  const [platform, setPlatform] = useState<Platform | "other">("other");
+  const [platform, setPlatform] = useState<DownloadPlatform>("other");
 
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("platform");
@@ -35,6 +36,7 @@ export default function DownloadsPage() {
   }, []);
 
   const recommended = platform === "other" ? null : apps[platform];
+  const recommendedPlatform: Platform | null = platform === "other" ? null : platform;
 
   return <main className="downloadsPage">
     <div className="downloadsShell">
@@ -44,10 +46,10 @@ export default function DownloadsPage() {
         <div><div className="eyebrow">TWILIGHT APP</div><h1>Download Twilight</h1><p>Official TWILIGHT desktop and mobile installers.</p></div>
       </div>
 
-      {recommended && <section className="recommendedCard">
+      {recommended && recommendedPlatform && <section className="recommendedCard">
         <div className="recommendedLabel">RECOMMENDED FOR YOUR DEVICE</div>
         <div className="recommendedMain"><div className="bigAppIcon">{recommended.icon}</div><div><h2>{recommended.name}</h2><p>{recommended.file} · {recommended.note}</p></div></div>
-        <a className="primaryDownload" href={hrefFor(platform)}>↓ Download and install</a>
+        <a className="primaryDownload" href={hrefFor(recommendedPlatform)}>↓ Download and install</a>
         <div className="downloadHint">The button downloads the installer directly. Your operating system may ask you to confirm the installation.</div>
       </section>}
 
