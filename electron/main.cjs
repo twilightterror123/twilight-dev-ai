@@ -1,6 +1,6 @@
 const { app, BrowserWindow, shell } = require("electron");
 
-const URL = process.env.TWILIGHT_APP_URL || "https://twilight-dev-ai.vercel.app";
+const URL = process.env.ZYNTRA_APP_URL || "https://twilight-dev-ai.vercel.app";
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -10,10 +10,7 @@ function createWindow() {
     minHeight: 620,
     backgroundColor: "#0b0b0b",
     autoHideMenuBar: true,
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
   });
 
   win.loadURL(URL);
@@ -25,11 +22,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   createWindow();
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
+  app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
+app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
