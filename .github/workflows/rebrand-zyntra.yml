@@ -1,0 +1,49 @@
+name: Rebrand Zyntra
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - .github/workflows/rebrand-zyntra.yml
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply Zyntra rebrand and media fixes
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p=Path('app/page.tsx')
+          s=p.read_text()
+          s=s.replace('twilight-chats-v9','zyntra-chats-v1').replace('TWILIGHT AI','ZYNTRA').replace('TWILIGHT','ZYNTRA').replace('Twilight','Zyntra').replace('twilight-code','zyntra-code')
+          s=s.replace('const POLLINATIONS_IMAGE = "https://image.pollinations.ai/prompt/";','const POLLINATIONS_IMAGE = "https://image.pollinations.ai/prompt/";\n\nasync function researchWeb(query: string) {\n  const response = await fetch("/api/web-research", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query }) });\n  const data = await response.json().catch(() => ({}));\n  if (!response.ok) throw new Error(data?.error || "Web research failed.");\n  return typeof data?.context === "string" ? data.context : "";\n}')
+          old='''function buildFreeImageUrl(prompt: string) {\n  const enhanced = `${prompt}. Clean professional result, accurate composition, natural lighting, coherent details, no watermark.`;\n  return `${POLLINATIONS_IMAGE}${encodeURIComponent(enhanced)}?width=1024&height=1024&model=flux&safe=true&nologo=false`;\n}\n\nasync function generateFreeVideo(prompt: string) {\n  const response = await fetch("https://video.pollinations.ai/generate", {\n    method: "POST",\n    headers: { "Content-Type": "application/json" },\n    body: JSON.stringify({\n      prompt: `${prompt}. Clean professional result, coherent motion and lighting, no unrelated elements.`,\n      model: "video-gen",\n      duration: 4,\n      resolution: "360p",\n    }),\n  });\n  if (!response.ok) {\n    const detail = await response.text().catch(() => "");\n    throw new Error(detail || `Video generation failed (${response.status}).`);\n  }\n  const blob = await response.blob();\n  if (!blob.size) throw new Error("Video generation returned an empty file.");\n  return URL.createObjectURL(blob);\n}'''
+          new='''function buildFreeImageUrl(prompt: string, research: string) {\n  const enhanced = `${prompt}. Internet research context: ${research.slice(0, 5000)}. Clean professional result, accurate composition, natural lighting, coherent details, no watermark.`;\n  return `${POLLINATIONS_IMAGE}${encodeURIComponent(enhanced)}?width=1024&height=1024&model=flux&safe=true&nologo=false&seed=${Date.now()}`;\n}\n\nasync function generateFreeVideo(prompt: string, research: string) {\n  const response = await fetch("/api/generate-video", {\n    method: "POST",\n    headers: { "Content-Type": "application/json" },\n    body: JSON.stringify({ prompt, research }),\n  });\n  if (!response.ok) {\n    const data = await response.json().catch(() => ({}));\n    throw new Error(data?.error || `Video generation failed (${response.status}).`);\n  }\n  const blob = await response.blob();\n  if (!blob.size) throw new Error("Video generation returned an empty file.");\n  return URL.createObjectURL(blob);\n}'''
+          if old not in s: raise SystemExit('media helper block not found')
+          s=s.replace(old,new)
+          s=s.replace('''if (mode === "image") {\n        if (attached) {\n          const note = "The attached image is available for analysis in chat mode. Image generation currently uses a public text-to-image endpoint.";\n          const url = buildFreeImageUrl(text || "A polished version of the provided image subject");''','''if (mode === "image") {\n        const research = await researchWeb(text || "the attached image subject");\n        if (attached) {\n          const note = "Web research completed before image generation.";\n          const url = buildFreeImageUrl(text || "A polished version of the provided image subject", research);''')
+          s=s.replace('const url = buildFreeImageUrl(text);','const url = buildFreeImageUrl(text, research);')
+          s=s.replace('''} else if (mode === "video") {\n        const url = await generateFreeVideo(text || "A clean cinematic scene with subtle camera movement");''','''} else if (mode === "video") {\n        const research = await researchWeb(text || "the requested video subject");\n        const url = await generateFreeVideo(text || "A clean cinematic scene with subtle camera movement", research);''')
+          p.write_text(s)
+
+          c=Path('app/api/chat/route.ts'); cs=c.read_text().replace('You are Twilight,','You are Zyntra,'); c.write_text(cs)
+          d=Path('app/downloads/page.tsx'); ds=d.read_text().replace('Twilight-latest','Zyntra-latest').replace('Twilight','Zyntra').replace('TWILIGHT','ZYNTRA').replace('Back to Zyntra','Back to Zyntra'); d.write_text(ds)
+          e=Path('electron/main.cjs'); es=e.read_text().replace('TWILIGHT_APP_URL','ZYNTRA_APP_URL'); e.write_text(es)
+          Path('app/api/web-research').mkdir(parents=True, exist_ok=True)
+          Path('app/api/web-research/route.ts').write_text(r'''export const runtime = "nodejs";\n\nfunction clean(value: string, max: number) { return value.replace(/\\s+/g, " ").trim().slice(0, max); }\n\nexport async function POST(req: Request) {\n  try {\n    const body = await req.json();\n    const query = typeof body?.query === "string" ? body.query.trim() : "";\n    if (!query) return Response.json({ error: "Missing search query." }, { status: 400 });\n    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=de-de`;\n    const response = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 Zyntra/1.0" }, cache: "no-store" });\n    if (!response.ok) return Response.json({ context: "Web search unavailable." }, { status: 200 });\n    const html = await response.text();\n    const results: string[] = [];\n    const re = /<a[^>]+class="result__a"[^>]*>([\\s\\S]*?)<\\/a>[\\s\\S]*?<a[^>]+class="result__snippet"[^>]*>([\\s\\S]*?)<\\/a>/gi;\n    let match: RegExpExecArray | null;\n    while ((match = re.exec(html)) && results.length < 6) {\n      const title = clean(match[1].replace(/<[^>]+>/g, " "), 180);\n      const snippet = clean(match[2].replace(/<[^>]+>/g, " "), 500);\n      if (title && snippet) results.push(`${title}: ${snippet}`);\n    }\n    return Response.json({ context: results.join("\\n") || "No useful web results were returned." });\n  } catch (error) {\n    return Response.json({ context: "Web search unavailable." }, { status: 200 });\n  }\n}\n'''.replace('\\n','\n'))
+
+          Path('app/api/generate-video/route.ts').write_text(r'''export const runtime = "nodejs";\nexport const maxDuration = 60;\n\nconst VIDEO_API = "https://video.pollinations.ai/generate";\n\nexport async function POST(req: Request) {\n  try {\n    const body = await req.json();\n    const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";\n    const research = typeof body?.research === "string" ? body.research.slice(0, 6000) : "";\n    if (!prompt) return Response.json({ error: "Please describe the video." }, { status: 400 });\n    const finalPrompt = `${prompt}. Web research context: ${research}. Clean professional result, coherent motion and lighting, no unrelated elements.`;\n    const upstream = await fetch(VIDEO_API, {\n      method: "POST",\n      headers: { "Content-Type": "application/json", "Accept": "video/mp4,video/*,*/*" },\n      body: JSON.stringify({ prompt: finalPrompt, model: "video-gen", duration: 4, resolution: "360p" }),\n      cache: "no-store",\n    });\n    if (!upstream.ok) {\n      const detail = await upstream.text().catch(() => "");\n      return Response.json({ error: detail || `Public video service returned ${upstream.status}.` }, { status: 502 });\n    }\n    const buffer = await upstream.arrayBuffer();\n    if (!buffer.byteLength) return Response.json({ error: "Video service returned an empty file." }, { status: 502 });\n    return new Response(buffer, { headers: { "Content-Type": upstream.headers.get("content-type") || "video/mp4", "Cache-Control": "no-store" } });\n  } catch (error) {\n    return Response.json({ error: error instanceof Error ? error.message : "Video generation failed." }, { status: 502 });\n  }\n}\n'''.replace('\\n','\n'))
+
+          import re
+          readme=Path('README.md'); rs=readme.read_text().replace('# Twilight Dev AI','# Zyntra AI').replace('Twilight','Zyntra'); readme.write_text(rs)
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm -f .github/workflows/rebrand-zyntra.yml
+          git add app/page.tsx app/api/chat/route.ts app/api/generate-video/route.ts app/api/web-research/route.ts app/downloads/page.tsx electron/main.cjs README.md
+          git commit -m "feat: rebrand to Zyntra and add web research" || exit 0
+          git push
