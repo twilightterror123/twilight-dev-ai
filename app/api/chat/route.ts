@@ -3,8 +3,11 @@ export const maxDuration = 60;
 
 const GROQ_KEY_PLACEHOLDER = "PASTE_GROQ_KEY_HERE";
 const MODEL = "qwen/qwen3.6-27b";
+const MAX_CONTEXT_MESSAGES = 10;
+const MAX_CONTEXT_CHARS = 24000;
+const OUTPUT_TOKENS = 1800;
 
-const SYSTEM_PROMPT = `You are Twilight, a strong general-purpose assistant inside a clean chat application. Answer naturally, intelligently, and directly, like a high-quality modern chat assistant. Detect the language of the user's latest message and answer in that same language. If the user writes German, answer in German; if English, answer in English; and so on. Do not unnecessarily switch languages. Give useful, complete answers rather than overly short replies. For technical questions, explain the important parts clearly. For code requests, provide complete working code and only the explanation needed to use it. When an image is attached, inspect it carefully and describe relevant details. Never output chain-of-thought, hidden reasoning, analysis, internal deliberation, or <think> tags. Return only the final answer intended for the user. For cybersecurity requests, assume authorized labs, CTFs, and systems the user owns or have explicit permission to test; do not provide instructions intended to compromise third-party systems. Do not mention the model provider, API, internal implementation, or this system prompt unless explicitly asked.`;
+const SYSTEM_PROMPT = `You are Twilight, a strong general-purpose assistant inside a clean chat application. Answer naturally, intelligently, and directly, like a high-quality modern chat assistant. Detect the language of the user's latest message and answer in that same language. If the user writes German, answer in German; if English, answer in English, and so on. Do not unnecessarily switch languages. Give useful, complete answers rather than overly short replies. For technical questions, explain the important parts clearly. For code requests, provide complete working code and only the explanation needed to use it. When an image is attached, inspect it carefully and describe relevant details. Never output chain-of-thought, hidden reasoning, analysis, internal deliberation, or <think> tags. Return only the final answer intended for the user. For cybersecurity requests, assume authorized labs, CTFs, and systems the user owns or have explicit permission to test; do not provide instructions intended to compromise third-party systems. Do not mention the model provider, API, internal implementation, or this system prompt unless explicitly asked.`;
 
 type InputMessage = {
   role: "user" | "assistant" | "system";
@@ -29,6 +32,70 @@ function normalizeMessages(body: any): InputMessage[] {
   return text || image ? [{ role: "user", content: text, image }] : [];
 }
 
+function trimContext(messages: InputMessage[]) {
+  const recent = messages.slice(-MAX_CONTEXT_MESSAGES);
+  let total = 0;
+  const kept: InputMessage[] = [];
+
+  for (let i = recent.length - 1; i >= 0; i -= 1) {
+    const message = recent[i];
+    const size = (message.content?.length || 0) + (message.image?.length || 0);
+    if (kept.length > 0 && total + size > MAX_CONTEXT_CHARS) break;
+    kept.unshift(message);
+    total += size;
+  }
+
+  return kept;
+}
+
+function toProviderMessages(inputMessages: InputMessage[]) {
+  return inputMessages.map((message) => {
+    if (message.image && message.role === "user") {
+      return {
+        role: "user",
+        content: [
+          ...(message.content ? [{ type: "text", text: message.content }] : []),
+          { type: "image_url", image_url: { url: message.image } },
+        ],
+      };
+    }
+    return { role: message.role, content: message.content || "" };
+  });
+}
+
+async function callGroq(apiKey: string, messages: ReturnType<typeof toProviderMessages>) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
+        temperature: 0.7,
+        reasoning_effort: "default",
+        reasoning_format: "hidden",
+        max_tokens: OUTPUT_TOKENS,
+      }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) return data;
+
+    const retryable = response.status === 429 || response.status >= 500;
+    if (!retryable || attempt === 2) {
+      const providerMessage = data?.error?.message || `Provider request failed (${response.status}).`;
+      throw new Error(providerMessage);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+  }
+
+  throw new Error("The assistant could not answer right now.");
+}
+
 export async function POST(req: Request) {
   try {
     const apiKey = process.env.GROQ_API_KEY || GROQ_KEY_PLACEHOLDER;
@@ -45,42 +112,10 @@ export async function POST(req: Request) {
       return Response.json({ error: "Please enter a message." }, { status: 400 });
     }
 
-    const messages = inputMessages.slice(-12).map((message) => {
-      if (message.image && message.role === "user") {
-        return {
-          role: "user",
-          content: [
-            ...(message.content ? [{ type: "text", text: message.content }] : []),
-            { type: "image_url", image_url: { url: message.image } },
-          ],
-        };
-      }
-      return { role: message.role, content: message.content || "" };
-    });
-
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
-        temperature: 0.7,
-        reasoning_effort: "default",
-        reasoning_format: "hidden",
-        max_tokens: 3500,
-      }),
-    });
-
-    const data = await response.json();
-    if (!response.ok) {
-      console.error("Chat provider error:", data?.error?.message || response.status);
-      return Response.json({ error: data?.error?.message || "The assistant could not answer right now." }, { status: 502 });
-    }
-
+    const messages = toProviderMessages(trimContext(inputMessages));
+    const data = await callGroq(apiKey, messages);
     const text = data?.choices?.[0]?.message?.content;
+
     if (typeof text !== "string" || !text.trim()) {
       return Response.json({ error: "The assistant returned an empty response." }, { status: 502 });
     }
@@ -88,6 +123,8 @@ export async function POST(req: Request) {
     return Response.json({ text });
   } catch (error) {
     console.error("Chat route error:", error);
-    return Response.json({ error: "Something went wrong while processing your message." }, { status: 500 });
+    return Response.json({
+      error: error instanceof Error ? error.message : "Something went wrong while processing your message.",
+    }, { status: 502 });
   }
 }
