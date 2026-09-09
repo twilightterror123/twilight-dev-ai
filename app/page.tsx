@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 type Role = "user" | "assistant";
 type Message = { id: string; role: Role; text?: string; image?: string };
@@ -9,10 +9,10 @@ type Mode = "chat" | "image";
 type Platform = "windows" | "linux" | "android" | "macos" | "ios" | "unknown";
 type ThinkingPhase = { title: string; detail: string };
 
-const STORAGE_KEY = "twilight-chats-v3";
+const STORAGE_KEY = "twilight-chats-v4";
 
 function TwilightMark({ className = "" }: { className?: string }) {
-  return <svg className={className} viewBox="0 0 32 32" aria-hidden="true"><path d="M5 7.5h22v5H18.5V25h-5V12.5H5z" fill="currentColor" /><path d="M21 17.5h6v5h-6z" fill="currentColor" opacity=".45" /></svg>;
+  return <svg className={className} viewBox="0 0 32 32" aria-hidden="true"><path d="M5 7.5h22v5H18.5V25h-5V12.5H5z" fill="currentColor" /><path d="M21 17.5h6v5h-6z" fill="currentColor" opacity=".4" /></svg>;
 }
 
 function detectPlatform(): Platform {
@@ -27,33 +27,20 @@ function detectPlatform(): Platform {
 }
 
 const platformNames: Record<Platform, string> = {
-  windows: "Windows",
-  linux: "Linux",
-  android: "Android",
-  macos: "macOS",
-  ios: "iOS",
-  unknown: "your device",
+  windows: "Windows", linux: "Linux", android: "Android", macos: "macOS", ios: "iOS", unknown: "your device",
 };
 
 const downloadPlatforms: Record<Platform, string> = {
-  windows: "windows",
-  linux: "linux",
-  android: "android",
-  macos: "unknown",
-  ios: "unknown",
-  unknown: "unknown",
+  windows: "windows", linux: "linux", android: "android", macos: "unknown", ios: "unknown", unknown: "unknown",
 };
 
 function createChat(): Chat {
-  const id = crypto.randomUUID();
-  return { id, title: "New chat", updatedAt: Date.now(), messages: [] };
+  return { id: crypto.randomUUID(), title: "New chat", updatedAt: Date.now(), messages: [] };
 }
 
 function safeLoadChats(): Chat[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((chat) => chat && typeof chat.id === "string" && Array.isArray(chat.messages));
   } catch {
@@ -65,14 +52,10 @@ function safeSaveChats(chats: Chat[]) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
   } catch {
-    const textOnly = chats.map((chat) => ({
-      ...chat,
-      messages: chat.messages.map((message) => ({ id: message.id, role: message.role, text: message.text })),
-    }));
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(textOnly));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(chats.map((chat) => ({ ...chat, messages: chat.messages.map(({ id, role, text }) => ({ id, role, text })) }))));
     } catch {
-      // Ignore storage failures; the current in-memory chat still works.
+      // Keep the active chat in memory when browser storage is unavailable.
     }
   }
 }
@@ -85,11 +68,7 @@ export default function Home() {
   const [image, setImage] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("chat");
   const [platform, setPlatform] = useState<Platform>("unknown");
-  const [showAppPrompt, setShowAppPrompt] = useState(false);
-  const [thinkingPhase, setThinkingPhase] = useState<ThinkingPhase>({
-    title: "Analyzing",
-    detail: "Reading your message…",
-  });
+  const [thinkingPhase, setThinkingPhase] = useState<ThinkingPhase>({ title: "Thinking", detail: "Working on your request…" });
   const fileRef = useRef<HTMLInputElement>(null);
 
   const activeChat = chats.find((chat) => chat.id === activeChatId) ?? null;
@@ -99,35 +78,29 @@ export default function Home() {
     const loaded = safeLoadChats();
     setChats(loaded);
     if (loaded[0]) setActiveChatId(loaded[0].id);
-
-    const detected = detectPlatform();
-    setPlatform(detected);
-    const timer = window.setTimeout(() => setShowAppPrompt(true), 900);
-    return () => window.clearTimeout(timer);
+    setPlatform(detectPlatform());
   }, []);
 
-  useEffect(() => {
-    safeSaveChats(chats);
-  }, [chats]);
+  useEffect(() => safeSaveChats(chats), [chats]);
 
   useEffect(() => {
     if (!busy) return;
-    const phases: ThinkingPhase[] = [
+    const phases = [
       { title: "Analyzing", detail: "Reading your message…" },
-      { title: "Thinking", detail: "Working through the request…" },
-      { title: "Checking", detail: "Checking the answer for mistakes…" },
-      { title: "Finalizing", detail: "Preparing the response…" },
+      { title: "Thinking", detail: "Working on the request…" },
+      { title: "Checking", detail: "Checking the response…" },
+      { title: "Finishing", detail: "Preparing your answer…" },
     ];
     let index = 0;
     setThinkingPhase(phases[0]);
     const timer = window.setInterval(() => {
       index = (index + 1) % phases.length;
       setThinkingPhase(phases[index]);
-    }, 850);
+    }, 900);
     return () => window.clearInterval(timer);
   }, [busy]);
 
-  function ensureChat(): Chat {
+  function ensureChat() {
     if (activeChat) return activeChat;
     const chat = createChat();
     setChats((current) => [chat, ...current]);
@@ -139,17 +112,17 @@ export default function Home() {
     setChats((current) => current.map((chat) => chat.id === chatId ? updater(chat) : chat));
   }
 
-  function selectChat(chatId: string) {
-    setActiveChatId(chatId);
+  function newChat() {
+    const chat = createChat();
+    setChats((current) => [chat, ...current]);
+    setActiveChatId(chat.id);
     setInput("");
     setImage(null);
     setMode("chat");
   }
 
-  function newChat() {
-    const chat = createChat();
-    setChats((current) => [chat, ...current]);
-    setActiveChatId(chat.id);
+  function selectChat(chatId: string) {
+    setActiveChatId(chatId);
     setInput("");
     setImage(null);
     setMode("chat");
@@ -171,32 +144,23 @@ export default function Home() {
   }
 
   async function generateImage(prompt: string) {
-    const response = await fetch("/api/generate-image", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
-    });
+    const response = await fetch("/api/generate-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt }) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Image generation failed.");
     return data.image as string;
   }
 
-  async function submit(e?: React.FormEvent) {
+  async function submit(e?: FormEvent) {
     e?.preventDefault();
     const text = input.trim();
     if ((!text && !image) || busy) return;
 
     const chat = ensureChat();
     const attached = image;
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      text,
-      image: attached ?? undefined,
-    };
+    const userMessage: Message = { id: crypto.randomUUID(), role: "user", text, image: attached ?? undefined };
+    const title = chat.title === "New chat" ? (text.slice(0, 48) || "Image request") : chat.title;
+    const withUser: Chat = { ...chat, title, updatedAt: Date.now(), messages: [...chat.messages, userMessage] };
 
-    const title = chat.title === "New chat" ? (text.slice(0, 44) || "Image request") : chat.title;
-    const withUser = { ...chat, title, updatedAt: Date.now(), messages: [...chat.messages, userMessage] };
     setChats((current) => [withUser, ...current.filter((item) => item.id !== chat.id)]);
     setActiveChatId(chat.id);
     setInput("");
@@ -206,110 +170,86 @@ export default function Home() {
     try {
       if (mode === "image") {
         const result = await generateImage(text || "Create an image based on the attached reference image.");
-        const assistant: Message = {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          text: "Image ready.",
-          image: result,
-        };
-        updateChat(chat.id, (current) => ({ ...current, updatedAt: Date.now(), messages: [...current.messages, assistant] }));
+        updateChat(chat.id, (current) => ({ ...current, updatedAt: Date.now(), messages: [...current.messages, { id: crypto.randomUUID(), role: "assistant", text: "Image ready.", image: result }] }));
       } else {
-        const response = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: [...withUser.messages] }),
-        });
+        const response = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: withUser.messages }) });
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Request failed");
-        const assistant: Message = { id: crypto.randomUUID(), role: "assistant", text: data.text };
-        updateChat(chat.id, (current) => ({ ...current, updatedAt: Date.now(), messages: [...current.messages, assistant] }));
+        if (!response.ok) throw new Error(data.error || "The assistant could not answer right now.");
+        updateChat(chat.id, (current) => ({ ...current, updatedAt: Date.now(), messages: [...current.messages, { id: crypto.randomUUID(), role: "assistant", text: data.text }] }));
       }
     } catch (error) {
-      const assistant: Message = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        text: error instanceof Error ? error.message : "Something went wrong.",
-      };
-      updateChat(chat.id, (current) => ({ ...current, updatedAt: Date.now(), messages: [...current.messages, assistant] }));
+      updateChat(chat.id, (current) => ({ ...current, updatedAt: Date.now(), messages: [...current.messages, { id: crypto.randomUUID(), role: "assistant", text: error instanceof Error ? error.message : "Something went wrong." }] }));
     } finally {
       setBusy(false);
     }
   }
 
-  function downloadHref(target: Platform) {
-    const mapped = downloadPlatforms[target];
-    return mapped === "unknown" ? "/downloads" : `/api/download/${mapped}`;
-  }
-
+  const downloadHref = downloadPlatforms[platform] === "unknown" ? "/downloads" : `/api/download/${downloadPlatforms[platform]}`;
   const sortedChats = [...chats].sort((a, b) => b.updatedAt - a.updatedAt);
 
   return <main className="chatApp">
-    {showAppPrompt && <div className="appPromptOverlay" role="dialog" aria-modal="true" aria-label="Download Twilight app">
-      <div className="appPrompt">
-        <button className="appPromptClose" onClick={() => setShowAppPrompt(false)} aria-label="Close">×</button>
-        <div className="appPromptLogo"><TwilightMark /></div>
-        <div className="appPromptEyebrow">TWILIGHT APP</div>
-        <h2>Get Twilight for {platformNames[platform]}</h2>
-        <p>Install the real TWILIGHT client for your device. The button opens the installer download directly.</p>
-        <a className="appPromptDownload" href={downloadHref(platform)}>Download app</a>
-        <button className="appPromptLater" onClick={() => setShowAppPrompt(false)}>Continue in browser</button>
-      </div>
-    </div>}
-
     <aside className="chatSidebar">
-      <button className="logoButton" onClick={newChat} aria-label="New chat">
-        <span className="logoMark"><TwilightMark /></span><span>TWILIGHT</span>
-      </button>
-      <button className="newChat" onClick={newChat}><span className="newChatPlus">+</span><span>New chat</span></button>
-      {sortedChats.length > 0 && <>
-        <div className="historyLabel">Recent chats</div>
-        <div className="chatHistory">
-          {sortedChats.map((chat) => <div className={`historyItem ${chat.id === activeChatId ? "active" : ""}`} key={chat.id}>
-            <button className="historyOpen" onClick={() => selectChat(chat.id)} title={chat.title}>{chat.title}</button>
-            <button className="historyDelete" onClick={() => deleteChat(chat.id)} aria-label={`Delete ${chat.title}`}>×</button>
-          </div>)}
-        </div>
-      </>}
-      <a className="downloadApp" href={downloadHref(platform)}><span>↓</span><span>Download app</span></a>
+      <div className="sidebarTop">
+        <button className="brandButton" onClick={newChat} aria-label="New chat"><span className="brandIcon"><TwilightMark /></span><span>TWILIGHT</span></button>
+        <button className="newChat" onClick={newChat}><span>+</span><span>New chat</span><kbd>⌘ K</kbd></button>
+      </div>
+      <div className="historyLabel">Chats</div>
+      <div className="chatHistory">
+        {sortedChats.length === 0 ? <div className="emptyHistory">Your conversations will appear here.</div> : sortedChats.map((chat) => <div className={`historyItem ${chat.id === activeChatId ? "active" : ""}`} key={chat.id}>
+          <button className="historyOpen" onClick={() => selectChat(chat.id)} title={chat.title}><span className="historyDot" />{chat.title}</button>
+          <button className="historyDelete" onClick={() => deleteChat(chat.id)} aria-label={`Delete ${chat.title}`}>×</button>
+        </div>)}
+      </div>
+      <div className="sidebarBottom">
+        <a className="downloadApp" href={downloadHref}><span className="downloadIcon">↓</span><span><strong>Get the app</strong><small>{platformNames[platform]}</small></span></a>
+        <div className="sidebarFoot">TWILIGHT AI · v2</div>
+      </div>
     </aside>
 
     <section className="chatMain">
-      <header className="chatHeader"><div className="headerBrand"><span className="headerMark"><TwilightMark /></span><span>TWILIGHT</span></div></header>
+      <header className="chatHeader">
+        <div className="mobileBrand"><span className="headerMark"><TwilightMark /></span>TWILIGHT</div>
+        <div className="headerStatus"><span className="statusDot" />Online</div>
+      </header>
 
       <div className="chatContent">
         {messages.length === 0 ? <div className="welcome">
-          <div className="welcomeLogo"><TwilightMark /></div>
-          <h1>{mode === "image" ? "Create an image" : "How can I help?"}</h1>
+          <div className="welcomeIcon"><TwilightMark /></div>
+          <div className="welcomeEyebrow">TWILIGHT AI</div>
+          <h1>{mode === "image" ? "Create something." : "What are we working on?"}</h1>
+          <p>Ask anything, write code, analyze an image, or build your next idea.</p>
+          <div className="suggestions">
+            <button onClick={() => setInput("Explain this code and improve it")}>Improve code</button>
+            <button onClick={() => setInput("Help me build a clean website")}>Build a website</button>
+            <button onClick={() => setInput("Analyze this image")}>Analyze an image</button>
+          </div>
         </div> : <div className="messages">
           {messages.map((message) => <article key={message.id} className={`message ${message.role}`}>
-            {message.role === "assistant" && <div className="messageLogo"><TwilightMark /></div>}
+            {message.role === "assistant" ? <div className="messageLogo"><TwilightMark /></div> : <div className="userLabel">You</div>}
             <div className="messageBody">
               {message.text && <div className="messageText">{message.text}</div>}
               {message.image && <img src={message.image} alt="Generated or attached" className="messageImage" />}
             </div>
           </article>)}
-
-          {busy && <article className="message assistant">
-            <div className="messageLogo"><TwilightMark /></div>
-            <div className="thinkBox" aria-live="polite">
-              <span className="thinkDot" />
-              <span className="thinkTitle">{thinkingPhase.title}</span>
-              <span>{thinkingPhase.detail}</span>
-            </div>
-          </article>}
+          {busy && <article className="message assistant"><div className="messageLogo"><TwilightMark /></div><div className="thinkBox"><span className="thinkDot" /><span className="thinkTitle">{thinkingPhase.title}</span><span>{thinkingPhase.detail}</span></div></article>}
         </div>}
       </div>
 
-      <form className="composer" onSubmit={submit}>
-        {image && <div className="attachment"><img src={image} alt="Preview" /><button type="button" onClick={() => setImage(null)}>×</button></div>}
-        <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(e); } }} placeholder={mode === "image" ? "Describe the image..." : "Message Twilight..."} rows={1} />
-        <div className="composerBottom">
-          <button type="button" className={`modeButton ${mode === "image" ? "active" : ""}`} onClick={() => setMode(mode === "image" ? "chat" : "image")}>Image</button>
-          <button type="button" className="iconButton" onClick={() => fileRef.current?.click()} aria-label="Attach image">+</button>
-          <button className="sendButton" disabled={busy || (!input.trim() && !image)} aria-label="Send">↑</button>
-        </div>
-        <input ref={fileRef} hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && readImage(e.target.files[0])} />
-      </form>
+      <div className="composerWrap">
+        <form className="composer" onSubmit={submit}>
+          {image && <div className="attachment"><img src={image} alt="Preview" /><button type="button" onClick={() => setImage(null)}>×</button></div>}
+          <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(e); } }} placeholder={mode === "image" ? "Describe what you want to create…" : "Message Twilight…"} rows={1} />
+          <div className="composerBottom">
+            <div className="composerLeft">
+              <button type="button" className={`toolButton ${mode === "image" ? "active" : ""}`} onClick={() => setMode(mode === "image" ? "chat" : "image")}><span>✦</span> {mode === "image" ? "Image mode" : "Image"}</button>
+              <button type="button" className="toolButton attachButton" onClick={() => fileRef.current?.click()}><span>＋</span> Attach</button>
+            </div>
+            <button className="sendButton" disabled={busy || (!input.trim() && !image)} aria-label="Send"><span>↑</span></button>
+          </div>
+          <input ref={fileRef} hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && readImage(e.target.files[0])} />
+        </form>
+        <div className="composerHint">Enter to send · Shift + Enter for a new line</div>
+      </div>
     </section>
   </main>;
 }
