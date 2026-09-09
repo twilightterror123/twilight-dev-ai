@@ -3,13 +3,13 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
 type Role = "user" | "assistant";
-type Message = { id: string; role: Role; text?: string; image?: string };
+type Message = { id: string; role: Role; text?: string; image?: string; video?: string };
 type Chat = { id: string; title: string; updatedAt: number; messages: Message[] };
-type Mode = "chat" | "image";
+type Mode = "chat" | "image" | "video";
 type Platform = "windows" | "linux" | "android" | "macos" | "ios" | "unknown";
 type ThinkingPhase = { title: string; detail: string };
 
-const STORAGE_KEY = "twilight-chats-v4";
+const STORAGE_KEY = "twilight-chats-v5";
 
 function TwilightMark({ className = "" }: { className?: string }) {
   return <svg className={className} viewBox="0 0 32 32" aria-hidden="true"><path d="M5 7.5h22v5H18.5V25h-5V12.5H5z" fill="currentColor" /><path d="M21 17.5h6v5h-6z" fill="currentColor" opacity=".4" /></svg>;
@@ -43,20 +43,14 @@ function safeLoadChats(): Chat[] {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((chat) => chat && typeof chat.id === "string" && Array.isArray(chat.messages));
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 
 function safeSaveChats(chats: Chat[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
-  } catch {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(chats.map((chat) => ({ ...chat, messages: chat.messages.map(({ id, role, text }) => ({ id, role, text })) }))));
-    } catch {
-      // Keep the active chat in memory when browser storage is unavailable.
-    }
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(chats)); }
+  catch {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(chats.map((chat) => ({ ...chat, messages: chat.messages.map(({ id, role, text }) => ({ id, role, text })) })))); }
+    catch { /* keep in memory */ }
   }
 }
 
@@ -86,19 +80,16 @@ export default function Home() {
   useEffect(() => {
     if (!busy) return;
     const phases = [
-      { title: "Analyzing", detail: "Reading your message…" },
-      { title: "Thinking", detail: "Working on the request…" },
-      { title: "Checking", detail: "Checking the response…" },
-      { title: "Finishing", detail: "Preparing your answer…" },
+      { title: "Analyzing", detail: "Reading your request…" },
+      { title: "Thinking", detail: mode === "video" ? "Planning the video…" : "Working on the request…" },
+      { title: "Checking", detail: "Checking the result…" },
+      { title: "Finishing", detail: "Preparing it for you…" },
     ];
     let index = 0;
     setThinkingPhase(phases[0]);
-    const timer = window.setInterval(() => {
-      index = (index + 1) % phases.length;
-      setThinkingPhase(phases[index]);
-    }, 900);
+    const timer = window.setInterval(() => { index = (index + 1) % phases.length; setThinkingPhase(phases[index]); }, 900);
     return () => window.clearInterval(timer);
-  }, [busy]);
+  }, [busy, mode]);
 
   function ensureChat() {
     if (activeChat) return activeChat;
@@ -116,16 +107,11 @@ export default function Home() {
     const chat = createChat();
     setChats((current) => [chat, ...current]);
     setActiveChatId(chat.id);
-    setInput("");
-    setImage(null);
-    setMode("chat");
+    setInput(""); setImage(null); setMode("chat");
   }
 
   function selectChat(chatId: string) {
-    setActiveChatId(chatId);
-    setInput("");
-    setImage(null);
-    setMode("chat");
+    setActiveChatId(chatId); setInput(""); setImage(null); setMode("chat");
   }
 
   function deleteChat(chatId: string) {
@@ -138,9 +124,7 @@ export default function Home() {
 
   function readImage(file: File) {
     if (!file.type.startsWith("image/") || file.size > 8 * 1024 * 1024) return;
-    const reader = new FileReader();
-    reader.onload = () => setImage(String(reader.result));
-    reader.readAsDataURL(file);
+    const reader = new FileReader(); reader.onload = () => setImage(String(reader.result)); reader.readAsDataURL(file);
   }
 
   async function generateImage(prompt: string) {
@@ -148,6 +132,27 @@ export default function Home() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Image generation failed.");
     return data.image as string;
+  }
+
+  async function generateVideo(prompt: string, sourceImage?: string) {
+    const start = await fetch("/api/generate-video", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, image: sourceImage }),
+    });
+    const started = await start.json();
+    if (!start.ok) throw new Error(started.error || "Video generation could not be started.");
+
+    const requestId = started.requestId as string;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 3000));
+      const poll = await fetch(`/api/generate-video?id=${encodeURIComponent(requestId)}`, { cache: "no-store" });
+      const result = await poll.json();
+      if (!poll.ok) throw new Error(result.error || "Could not check video status.");
+      if (result.status === "done" && typeof result.video === "string") return result.video as string;
+      if (result.status === "failed" || result.status === "expired") throw new Error(result.error || `Video generation ${result.status}.`);
+    }
+    throw new Error("Video generation is taking too long. Please try again.");
   }
 
   async function submit(e?: FormEvent) {
@@ -158,19 +163,20 @@ export default function Home() {
     const chat = ensureChat();
     const attached = image;
     const userMessage: Message = { id: crypto.randomUUID(), role: "user", text, image: attached ?? undefined };
-    const title = chat.title === "New chat" ? (text.slice(0, 48) || "Image request") : chat.title;
+    const defaultTitle = mode === "video" ? "Video request" : mode === "image" ? "Image request" : "New chat";
+    const title = chat.title === "New chat" ? (text.slice(0, 48) || defaultTitle) : chat.title;
     const withUser: Chat = { ...chat, title, updatedAt: Date.now(), messages: [...chat.messages, userMessage] };
 
     setChats((current) => [withUser, ...current.filter((item) => item.id !== chat.id)]);
-    setActiveChatId(chat.id);
-    setInput("");
-    setImage(null);
-    setBusy(true);
+    setActiveChatId(chat.id); setInput(""); setImage(null); setBusy(true);
 
     try {
       if (mode === "image") {
         const result = await generateImage(text || "Create an image based on the attached reference image.");
         updateChat(chat.id, (current) => ({ ...current, updatedAt: Date.now(), messages: [...current.messages, { id: crypto.randomUUID(), role: "assistant", text: "Image ready.", image: result }] }));
+      } else if (mode === "video") {
+        const result = await generateVideo(text || "Animate the attached image naturally with subtle camera movement.", attached ?? undefined);
+        updateChat(chat.id, (current) => ({ ...current, updatedAt: Date.now(), messages: [...current.messages, { id: crypto.randomUUID(), role: "assistant", text: "Video ready.", video: result }] }));
       } else {
         const response = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: withUser.messages }) });
         const data = await response.json();
@@ -179,13 +185,12 @@ export default function Home() {
       }
     } catch (error) {
       updateChat(chat.id, (current) => ({ ...current, updatedAt: Date.now(), messages: [...current.messages, { id: crypto.randomUUID(), role: "assistant", text: error instanceof Error ? error.message : "Something went wrong." }] }));
-    } finally {
-      setBusy(false);
-    }
+    } finally { setBusy(false); }
   }
 
   const downloadHref = downloadPlatforms[platform] === "unknown" ? "/downloads" : `/api/download/${downloadPlatforms[platform]}`;
   const sortedChats = [...chats].sort((a, b) => b.updatedAt - a.updatedAt);
+  const placeholder = mode === "image" ? "Describe what you want to create…" : mode === "video" ? "Describe the video you want…" : "Message Twilight…";
 
   return <main className="chatApp">
     <aside className="chatSidebar">
@@ -207,49 +212,32 @@ export default function Home() {
     </aside>
 
     <section className="chatMain">
-      <header className="chatHeader">
-        <div className="mobileBrand"><span className="headerMark"><TwilightMark /></span>TWILIGHT</div>
-        <div className="headerStatus"><span className="statusDot" />Online</div>
-      </header>
-
+      <header className="chatHeader"><div className="mobileBrand"><span className="headerMark"><TwilightMark /></span>TWILIGHT</div><div className="headerStatus"><span className="statusDot" />Online</div></header>
       <div className="chatContent">
         {messages.length === 0 ? <div className="welcome">
-          <div className="welcomeIcon"><TwilightMark /></div>
-          <div className="welcomeEyebrow">TWILIGHT AI</div>
-          <h1>{mode === "image" ? "Create something." : "What are we working on?"}</h1>
-          <p>Ask anything, write code, analyze an image, or build your next idea.</p>
-          <div className="suggestions">
-            <button onClick={() => setInput("Explain this code and improve it")}>Improve code</button>
-            <button onClick={() => setInput("Help me build a clean website")}>Build a website</button>
-            <button onClick={() => setInput("Analyze this image")}>Analyze an image</button>
-          </div>
+          <div className="welcomeIcon"><TwilightMark /></div><div className="welcomeEyebrow">TWILIGHT AI</div>
+          <h1>{mode === "video" ? "Make a video." : mode === "image" ? "Create something." : "What are we working on?"}</h1>
+          <p>Chat, write code, analyze images, generate images, or turn an idea into a video.</p>
+          <div className="suggestions"><button onClick={() => setInput("Explain this code and improve it")}>Improve code</button><button onClick={() => setInput("Help me build a clean website")}>Build a website</button><button onClick={() => setMode("video")}>Generate a video</button></div>
         </div> : <div className="messages">
           {messages.map((message) => <article key={message.id} className={`message ${message.role}`}>
             {message.role === "assistant" ? <div className="messageLogo"><TwilightMark /></div> : <div className="userLabel">You</div>}
-            <div className="messageBody">
-              {message.text && <div className="messageText">{message.text}</div>}
-              {message.image && <img src={message.image} alt="Generated or attached" className="messageImage" />}
-            </div>
+            <div className="messageBody">{message.text && <div className="messageText">{message.text}</div>}{message.image && <img src={message.image} alt="Generated or attached" className="messageImage" />}{message.video && <div className="messageVideoWrap"><video src={message.video} className="messageVideo" controls playsInline preload="metadata" /><a className="videoDownload" href={message.video} target="_blank" rel="noreferrer" download>Download video</a></div>}</div>
           </article>)}
           {busy && <article className="message assistant"><div className="messageLogo"><TwilightMark /></div><div className="thinkBox"><span className="thinkDot" /><span className="thinkTitle">{thinkingPhase.title}</span><span>{thinkingPhase.detail}</span></div></article>}
         </div>}
       </div>
 
-      <div className="composerWrap">
-        <form className="composer" onSubmit={submit}>
-          {image && <div className="attachment"><img src={image} alt="Preview" /><button type="button" onClick={() => setImage(null)}>×</button></div>}
-          <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(e); } }} placeholder={mode === "image" ? "Describe what you want to create…" : "Message Twilight…"} rows={1} />
-          <div className="composerBottom">
-            <div className="composerLeft">
-              <button type="button" className={`toolButton ${mode === "image" ? "active" : ""}`} onClick={() => setMode(mode === "image" ? "chat" : "image")}><span>✦</span> {mode === "image" ? "Image mode" : "Image"}</button>
-              <button type="button" className="toolButton attachButton" onClick={() => fileRef.current?.click()}><span>＋</span> Attach</button>
-            </div>
-            <button className="sendButton" disabled={busy || (!input.trim() && !image)} aria-label="Send"><span>↑</span></button>
-          </div>
-          <input ref={fileRef} hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && readImage(e.target.files[0])} />
-        </form>
-        <div className="composerHint">Enter to send · Shift + Enter for a new line</div>
-      </div>
+      <div className="composerWrap"><form className="composer" onSubmit={submit}>
+        {image && <div className="attachment"><img src={image} alt="Preview" /><button type="button" onClick={() => setImage(null)}>×</button></div>}
+        <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(e); } }} placeholder={placeholder} rows={1} />
+        <div className="composerBottom"><div className="composerLeft">
+          <button type="button" className={`toolButton ${mode === "image" ? "active" : ""}`} onClick={() => setMode(mode === "image" ? "chat" : "image")}><span>✦</span> Image</button>
+          <button type="button" className={`toolButton ${mode === "video" ? "active" : ""}`} onClick={() => setMode(mode === "video" ? "chat" : "video")}><span>▶</span> Video</button>
+          <button type="button" className="toolButton attachButton" onClick={() => fileRef.current?.click()}><span>＋</span> Attach</button>
+        </div><button className="sendButton" disabled={busy || (!input.trim() && !image)} aria-label="Send"><span>↑</span></button></div>
+        <input ref={fileRef} hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && readImage(e.target.files[0])} />
+      </form><div className="composerHint">Enter to send · Shift + Enter for a new line</div></div>
     </section>
   </main>;
 }
