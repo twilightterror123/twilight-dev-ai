@@ -1,23 +1,29 @@
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
-const VIDEO_API = "https://video.pollinations.ai/generate";
+async function callVideo(prompt: string, apiKey: string) {
+  const url = `https://gen.pollinations.ai/video/${encodeURIComponent(prompt)}?model=veo&duration=4`;
+  return fetch(url, {
+    headers: { Authorization: `Bearer ${apiKey}`, Accept: "video/mp4,video/*,*/*" },
+    cache: "no-store",
+  });
+}
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
     const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
-    const research = typeof body?.research === "string" ? body.research.slice(0, 6000) : "";
+    const research = typeof body?.research === "string" ? body.research.slice(0, 5000) : "";
     if (!prompt) return Response.json({ error: "Please describe the video." }, { status: 400 });
 
-    const finalPrompt = `${prompt}. Use this web research only where relevant: ${research}. Clean professional result, coherent motion and lighting, no unrelated elements.`;
-    const upstream = await fetch(VIDEO_API, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "video/mp4,video/*,*/*" },
-      body: JSON.stringify({ prompt: finalPrompt, model: "video-gen", duration: 4, resolution: "360p" }),
-      cache: "no-store",
-    });
+    const finalPrompt = `${prompt}. Use relevant web research only for factual detail. Clean professional result, coherent motion, stable camera, natural lighting, consistent subjects, no unrelated elements.` + (research ? `\nResearch: ${research}` : "");
+    const key = process.env.POLLINATIONS_API_KEY;
 
+    if (!key) {
+      return Response.json({ error: "Video generation needs POLLINATIONS_API_KEY in Vercel Environment Variables." }, { status: 503 });
+    }
+
+    const upstream = await callVideo(finalPrompt, key);
     if (!upstream.ok) {
       const detail = await upstream.text().catch(() => "");
       return Response.json({ error: detail || `Video generation failed (${upstream.status}).` }, { status: 502 });
